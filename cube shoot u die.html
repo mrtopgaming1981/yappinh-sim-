@@ -1,0 +1,365 @@
+<html>
+<head>
+    <title>Dodge Survival</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: black; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const PROJECTILE_SPEED = 5;
+const WALL_COUNT = 10;
+const ORBIT_COUNT = 16;
+const RANDOM_PROJECTILE_CHANCE = 0.03;
+
+let gameStarted = false;
+
+let player = {
+    x: canvas.width / 2,
+    y: canvas.height / 2,
+    size: 20,
+    speed: 5
+};
+
+let keys = {};
+let mouse = { x: 0, y: 0 };
+
+window.addEventListener("mousemove", e => {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+});
+
+window.addEventListener("keydown", e => {
+    keys[e.key] = true;
+
+    if (e.key === " ") {
+        if (!gameStarted) {
+            gameStarted = true;
+        } else if (gameOver || victory) {
+            location.reload();
+        }
+    }
+});
+
+window.addEventListener("keyup", e => keys[e.key] = false);
+
+window.addEventListener("mousedown", e => {
+    if (e.button === 0 && !gameOver && !victory && gameStarted) shoot();
+});
+
+let bossProjectiles = [];
+let playerBullets = [];
+
+let boss = {
+    x: canvas.width / 2,
+    y: canvas.height / 2,
+    size: 80,
+    angle: 0,
+    radius: 150,
+    centerX: canvas.width / 2,
+    centerY: canvas.height / 2,
+    hp: 4000
+};
+
+let currentAttack = "idle";
+let attackTimer = 300;
+let warningTime = 80;
+let nextAttack = "wall";
+
+let health = 3;
+let maxHealth = 3;
+
+let invincible = false;
+let invincibleTimer = 0;
+
+let gameOver = false;
+let victory = false;
+
+let reflectMode = false;
+
+function shoot() {
+    let angle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+
+    playerBullets.push({
+        x: player.x + player.size / 2,
+        y: player.y + player.size / 2,
+        size: 6,
+        speed: 8,
+        dx: Math.cos(angle),
+        dy: Math.sin(angle),
+        damage: 20
+    });
+}
+
+function hit(a, b) {
+    return (
+        a.x < b.x + b.size &&
+        a.x + a.size > b.x &&
+        a.y < b.y + b.size &&
+        a.y + a.size > b.y
+    );
+}
+
+function wallAttack() {
+    let dir = Math.random() < 0.5 ? -1 : 1;
+
+    for (let i = 0; i < WALL_COUNT; i++) {
+        let y = (canvas.height / WALL_COUNT) * i;
+
+        bossProjectiles.push({
+            x: dir === 1 ? 0 : canvas.width,
+            y,
+            size: 12,
+            speed: PROJECTILE_SPEED,
+            dx: dir,
+            dy: 0
+        });
+    }
+}
+
+function reflectAttack() {
+    reflectMode = true;
+
+    setTimeout(() => {
+        reflectMode = false;
+    }, 1500);
+}
+
+let orbitAngle = 0;
+
+function orbitAttack() {
+    for (let i = 0; i < ORBIT_COUNT; i++) {
+        let angle = orbitAngle + (i * (Math.PI * 2 / ORBIT_COUNT));
+
+        bossProjectiles.push({
+            x: boss.x,
+            y: boss.y,
+            size: 10,
+            speed: PROJECTILE_SPEED,
+            dx: Math.cos(angle),
+            dy: Math.sin(angle)
+        });
+    }
+
+    orbitAngle += 0.25;
+}
+
+function randomProjectile() {
+    let angle = Math.random() * Math.PI * 2;
+
+    bossProjectiles.push({
+        x: boss.x,
+        y: boss.y,
+        size: 8,
+        speed: PROJECTILE_SPEED - 1,
+        dx: Math.cos(angle),
+        dy: Math.sin(angle)
+    });
+}
+
+function updateBoss() {
+    if (currentAttack === "warning") return;
+
+    boss.angle += 0.02;
+    boss.x = boss.centerX + Math.cos(boss.angle) * boss.radius;
+    boss.y = boss.centerY + Math.sin(boss.angle) * boss.radius;
+}
+
+function update() {
+    if (!gameStarted) return;
+    if (gameOver || victory) return;
+
+    if (keys["w"]) player.y -= player.speed;
+    if (keys["s"]) player.y += player.speed;
+    if (keys["a"]) player.x -= player.speed;
+    if (keys["d"]) player.x += player.speed;
+
+    player.x = Math.max(0, Math.min(canvas.width - player.size, player.x));
+    player.y = Math.max(0, Math.min(canvas.height - player.size, player.y));
+
+    updateBoss();
+
+    if (Math.random() < RANDOM_PROJECTILE_CHANCE) {
+        randomProjectile();
+    }
+
+    for (let b of playerBullets) {
+        b.x += b.dx * b.speed;
+        b.y += b.dy * b.speed;
+
+        if (hit(b, boss)) {
+
+            if (!reflectMode) {
+                boss.hp -= b.damage;
+            }
+
+            if (reflectMode) {
+                let angle = Math.atan2(player.y - boss.y, player.x - boss.x);
+
+                bossProjectiles.push({
+                    x: boss.x + boss.size / 2,
+                    y: boss.y + boss.size / 2,
+                    size: b.size,
+                    speed: PROJECTILE_SPEED,
+                    dx: Math.cos(angle),
+                    dy: Math.sin(angle)
+                });
+            }
+
+            b.x = -9999;
+        }
+    }
+
+    for (let p of bossProjectiles) {
+        p.x += p.dx * p.speed;
+        p.y += p.dy * p.speed;
+
+        if (hit(p, player) && !invincible) {
+            health--;
+            invincible = true;
+            invincibleTimer = 45;
+        }
+    }
+
+    if (invincible) {
+        invincibleTimer--;
+        if (invincibleTimer <= 0) invincible = false;
+    }
+
+    attackTimer--;
+
+    if (attackTimer === warningTime) {
+        currentAttack = "warning";
+    }
+
+    if (attackTimer <= 0) {
+
+        if (nextAttack === "wall") {
+            currentAttack = "wall";
+            wallAttack();
+            nextAttack = "reflect";
+        }
+        else if (nextAttack === "reflect") {
+            currentAttack = "reflect";
+            reflectAttack();
+            nextAttack = "orbit";
+        }
+        else {
+            currentAttack = "orbit";
+            orbitAttack();
+            nextAttack = "wall";
+        }
+
+        attackTimer = 300;
+        currentAttack = "idle";
+    }
+
+    if (boss.hp <= 0) victory = true;
+    if (health <= 0) gameOver = true;
+	if(
+		player.x < boss.x + boss.size &&
+		player.x + player.size > boss.x &&
+		player.y < boss.y + boss.size && 
+		player.y + player.size > boss.y
+		){
+			if(!invincible){
+				health--;
+				invincible = true;
+				invincibleTimer = 45;
+			}
+		}
+}
+
+function draw() {
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (!gameStarted) {
+        ctx.fillStyle = "white";
+        ctx.font = "60px Arial";
+        ctx.fillText("DODGE SURVIVAL", canvas.width/2 - 220, canvas.height/2 - 80);
+
+        ctx.font = "30px Arial";
+        ctx.fillText("Press SPACE to Start", canvas.width/2 - 170, canvas.height/2 - 20);
+
+        ctx.font = "20px Arial";
+        ctx.fillStyle = "gray";
+        ctx.fillText("Game in development — features may change", canvas.width/2 - 200, canvas.height/2 + 30);
+
+        return;
+    }
+
+    ctx.fillStyle = "white";
+    ctx.fillRect(player.x, player.y, player.size, player.size);
+
+    ctx.fillStyle = "blue";
+    for (let b of playerBullets) {
+        ctx.fillRect(b.x, b.y, b.size, b.size);
+    }
+
+    ctx.fillStyle = "red";
+    for (let p of bossProjectiles) {
+        ctx.fillRect(p.x, p.y, p.size, p.size);
+    }
+
+    let bossColor = "yellow";
+
+    if (currentAttack === "wall") bossColor = "green";
+    else if (currentAttack === "reflect") bossColor = "red";
+    else if (currentAttack === "orbit") bossColor = "orange";
+
+    if (currentAttack === "warning") {
+        if (nextAttack === "wall") bossColor = "green";
+        else if (nextAttack === "reflect") bossColor = "red";
+        else if (nextAttack === "orbit") bossColor = "orange";
+    }
+
+    ctx.fillStyle = bossColor;
+    ctx.fillRect(boss.x, boss.y, boss.size, boss.size);
+
+    ctx.fillStyle = "gray";
+    ctx.fillRect(20, 20, 200, 20);
+
+    ctx.fillStyle = "green";
+    ctx.fillRect(20, 20, (health / maxHealth) * 200, 20);
+
+    ctx.fillStyle = "gray";
+    ctx.fillRect(20, 50, 200, 20);
+
+    ctx.fillStyle = "yellow";
+    ctx.fillRect(20, 50, (boss.hp / 4000) * 200, 20);
+
+    if (gameOver) {
+        ctx.fillStyle = "white";
+        ctx.font = "50px Arial";
+        ctx.fillText("GAME OVER", canvas.width/2 - 150, canvas.height/2);
+    }
+
+    if (victory) {
+        ctx.fillStyle = "white";
+        ctx.font = "50px Arial";
+        ctx.fillText("VICTORY", canvas.width/2 - 120, canvas.height/2);
+    }
+}
+
+function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+
+</body>
+</html>
